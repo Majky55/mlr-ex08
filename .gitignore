@@ -1,0 +1,6 @@
+# notebook and the unpacked agent ZIP — the app files live in the repo root
+ex08_student.ipynb
+ex08_for_agent/
+__pycache__/
+*.pyc
+.claude/

@@ -1,0 +1,709 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#12241a">
+<meta name="description" content="Leaf classifier running entirely in your browser with onnxruntime-web.">
+<title>Leaf classifier</title>
+<style>
+  :root {
+    --bg: #0f1713; --card: #17231d; --line: #2a3a31; --ink: #eaf2ec;
+    --dim: #9db3a6; --accent: #5ad67f; --warn: #ffb454; --bad: #ff7a6b;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--ink);
+    font: 16px/1.45 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    display: flex; flex-direction: column; align-items: center; gap: 16px;
+    padding: 20px 14px calc(28px + env(safe-area-inset-bottom));
+  }
+  main { width: 100%; max-width: 460px; display: flex; flex-direction: column; gap: 16px; }
+  header { text-align: center; }
+  h1 { margin: 0 0 4px; font-size: 1.5rem; letter-spacing: .01em; }
+  h2 { margin: 0 0 10px; font-size: .82rem; text-transform: uppercase; letter-spacing: .09em; color: var(--dim); }
+  .sub { margin: 0; color: var(--dim); font-size: .85rem; }
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: 14px; padding: 14px; }
+  .stage { position: relative; width: 100%; aspect-ratio: 1; border-radius: 10px; overflow: hidden; background: #000; }
+  video { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
+  .hint {
+    position: absolute; inset: 0; display: grid; place-items: center; padding: 18px;
+    text-align: center; color: var(--dim); font-size: .9rem;
+  }
+  .hint[hidden] { display: none; }
+  .row { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 12px; }
+  button, .file-label {
+    flex: 1 1 auto; padding: 11px 14px; border-radius: 9px; border: 1px solid var(--line);
+    background: #1e2f26; color: var(--ink); font: inherit; font-weight: 600; cursor: pointer;
+  }
+  button:active, .file-label:active { transform: translateY(1px); }
+  button.primary { background: var(--accent); border-color: var(--accent); color: #08210f; }
+  button:disabled { opacity: .5; cursor: default; }
+  input[type=file] { width: .1px; height: .1px; opacity: 0; position: absolute; }
+  .status { margin: 10px 0 0; font-size: .85rem; color: var(--dim); min-height: 1.2em; }
+  .status.ok { color: var(--accent); }
+  .status.warn { color: var(--warn); }
+  .status.bad { color: var(--bad); }
+  .verdict { font-weight: 700; }
+  ul.probs { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 9px; }
+  ul.probs li { display: grid; grid-template-columns: 5.2em 1fr 4.2em; align-items: center; gap: 9px; }
+  ul.probs .name { font-weight: 600; }
+  ul.probs .bar { height: 12px; border-radius: 6px; background: #12201a; overflow: hidden; }
+  ul.probs .fill { height: 100%; width: 0; background: #35735a; border-radius: 6px; transition: width .12s linear; }
+  ul.probs li.top .fill { background: var(--accent); }
+  ul.probs li.top .name { color: var(--accent); }
+  ul.probs .val { text-align: right; font-variant-numeric: tabular-nums; font-size: .9rem; }
+  table.cmp { width: 100%; border-collapse: collapse; margin-top: 10px; font-size: .84rem; font-variant-numeric: tabular-nums; }
+  table.cmp th, table.cmp td { text-align: right; padding: 3px 4px; border-bottom: 1px solid var(--line); }
+  table.cmp th:first-child, table.cmp td:first-child { text-align: left; }
+  #qr { display: block; margin: 0 auto; background: #fff; border-radius: 10px; image-rendering: pixelated; }
+  #qr-link { display: block; margin-top: 10px; text-align: center; color: var(--accent); word-break: break-all; font-weight: 600; }
+  footer { max-width: 460px; color: #64796e; font-size: .76rem; text-align: center; }
+  code { background: #12201a; padding: 1px 4px; border-radius: 4px; }
+</style>
+</head>
+<body>
+<header>
+  <h1>🍃 Leaf classifier</h1>
+  <p class="sub">Runs on this device with <code>onnxruntime-web</code> — no image is uploaded anywhere.</p>
+</header>
+
+<main>
+  <section class="card">
+    <h2>Camera</h2>
+    <div class="stage">
+      <video id="video" playsinline webkit-playsinline muted autoplay></video>
+      <div class="hint" id="hint">The central square is what the model sees.</div>
+    </div>
+    <div class="row">
+      <button id="start" class="primary" disabled>Start camera</button>
+      <button id="flip" hidden>Flip camera</button>
+      <button id="stop" hidden>Stop</button>
+    </div>
+    <p class="status" id="status">Loading the model…</p>
+    <p class="status" id="timing"></p>
+  </section>
+
+  <section class="card">
+    <h2>Probabilities</h2>
+    <ul class="probs" id="probs"></ul>
+  </section>
+
+  <section class="card">
+    <h2>Photo &amp; self-check</h2>
+    <div class="row">
+      <label class="file-label" for="file">Choose a photo</label>
+      <input type="file" id="file" accept="image/*">
+      <button id="selfcheck" disabled>Run self-check</button>
+    </div>
+    <p class="status">Upload any leaf photo, or <code>check_image.jpg</code> to compare with <code>check_expected.json</code>.</p>
+    <p class="status" id="check"></p>
+    <div id="cmp"></div>
+  </section>
+
+  <section class="card">
+    <h2>Open on your phone</h2>
+    <canvas id="qr" aria-label="QR code linking to this page"></canvas>
+    <a id="qr-link" href="#"></a>
+  </section>
+</main>
+
+<footer id="footer">Classes and preprocessing come from <code>model_info.json</code>; inference runs locally in WebAssembly.</footer>
+
+<script>
+"use strict";
+
+/* ------------------------------------------------------------------ *
+ * Where this page lives. The QR code encodes this URL; if the page is
+ * served from somewhere else (a local test server) the live URL wins.
+ * ------------------------------------------------------------------ */
+const APP_URL = "https://majky55.github.io/mlr-ex08/";
+
+const ORT_CDNS = [
+  "https://cdn.jsdelivr.net/npm/onnxruntime-web@1.31.1/dist/",
+  "https://unpkg.com/onnxruntime-web@1.31.1/dist/",
+];
+const MODEL_URL = "leaf_model.onnx";
+const FRAME_MS = 100;             // cap live inference at ~10 fps
+
+const $ = (id) => document.getElementById(id);
+const video = $("video"), statusEl = $("status"), timingEl = $("timing");
+const hintEl = $("hint"), probsEl = $("probs"), checkEl = $("check"), cmpEl = $("cmp");
+
+// Not called "ort": ort.min.js declares a global `var ort`, and a top-level
+// let/const of the same name would make that script fail to evaluate.
+let ortLib = null, session = null, inputName = null, stream = null;
+let MODEL = null;                 // { classes, input_size, mean, std }
+let raf = 0, busy = false, lastFrame = 0, facing = "environment";
+
+function setStatus(msg, kind) {
+  statusEl.textContent = msg;
+  statusEl.className = "status" + (kind ? " " + kind : "");
+}
+
+/* ------------------------------------------------------------------ *
+ * Preprocessing — must match the notebook's
+ *   ToTensor() (÷255, HWC -> CHW) then Normalize(mean, std)
+ * applied to the central square of the frame resized to input_size².
+ * ------------------------------------------------------------------ */
+const scratch = document.createElement("canvas");
+
+function toTensor(source, srcW, srcH) {
+  const size = MODEL.input_size;
+  const side = Math.min(srcW, srcH);                    // central square …
+  const sx = (srcW - side) / 2, sy = (srcH - side) / 2; // … crop, then resize
+
+  scratch.width = size;
+  scratch.height = size;
+  const ctx = scratch.getContext("2d", { willReadFrequently: true });
+  ctx.imageSmoothingEnabled = true;
+  ctx.imageSmoothingQuality = "high";
+  ctx.drawImage(source, sx, sy, side, side, 0, 0, size, size);
+
+  const px = ctx.getImageData(0, 0, size, size).data;   // RGBA, row-major
+  const plane = size * size;
+  const data = new Float32Array(3 * plane);             // [1, 3, size, size]
+  const [mR, mG, mB] = MODEL.mean;
+  const [sR, sG, sB] = MODEL.std;
+
+  for (let i = 0; i < plane; i++) {
+    const j = i * 4;
+    data[i]           = (px[j]     / 255 - mR) / sR;    // red plane
+    data[plane + i]   = (px[j + 1] / 255 - mG) / sG;    // green plane
+    data[2 * plane + i] = (px[j + 2] / 255 - mB) / sB;  // blue plane
+  }
+  return new ortLib.Tensor("float32", data, [1, 3, size, size]);
+}
+
+// The exported model ends in raw logits, so softmax happens here.
+function softmax(logits) {
+  const max = Math.max.apply(null, logits);
+  const exp = logits.map((v) => Math.exp(v - max));
+  const sum = exp.reduce((a, b) => a + b, 0);
+  return exp.map((v) => v / sum);
+}
+
+async function predict(source, srcW, srcH) {
+  const tensor = toTensor(source, srcW, srcH);
+  const output = await session.run({ [inputName]: tensor });
+  const out = output[session.outputNames[0]];
+  return softmax(Array.prototype.slice.call(out.data));
+}
+
+/* ------------------------------------------------------------------ *
+ * Probability display
+ * ------------------------------------------------------------------ */
+function buildProbRows() {
+  probsEl.textContent = "";
+  MODEL.classes.forEach((name) => {
+    const li = document.createElement("li");
+    li.innerHTML =
+      '<span class="name"></span><span class="bar"><span class="fill"></span></span><span class="val"></span>';
+    li.querySelector(".name").textContent = name;
+    probsEl.appendChild(li);
+  });
+}
+
+function showProbs(p) {
+  const rows = probsEl.children;
+  let top = 0;
+  p.forEach((v, i) => { if (v > p[top]) top = i; });
+  p.forEach((v, i) => {
+    const li = rows[i];
+    if (!li) return;
+    li.classList.toggle("top", i === top);
+    li.querySelector(".fill").style.width = (v * 100).toFixed(2) + "%";
+    li.querySelector(".val").textContent = (v * 100).toFixed(1) + "%";
+  });
+}
+
+/* ------------------------------------------------------------------ *
+ * Live camera
+ * ------------------------------------------------------------------ */
+async function startCamera() {
+  if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+    setStatus("This browser has no camera access (getUserMedia). Use the photo upload below.", "bad");
+    return false;
+  }
+  stopCamera();
+  const attempts = [
+    { video: { facingMode: { ideal: facing }, width: { ideal: 640 }, height: { ideal: 640 } }, audio: false },
+    { video: { facingMode: { ideal: "environment" } }, audio: false },
+    { video: true },
+  ];
+  let lastError = null;
+  for (const c of attempts) {
+    try { stream = await navigator.mediaDevices.getUserMedia(c); break; }
+    catch (err) { lastError = err; }
+  }
+  if (!stream) {
+    setStatus("Camera refused: " + lastError.message + ". You can still use the photo upload below.", "bad");
+    return false;
+  }
+  const track = stream.getVideoTracks()[0];
+  const real = track.getSettings ? track.getSettings().facingMode : null;
+  facing = real === "user" ? "user" : "environment";
+
+  video.srcObject = stream;
+  try { await video.play(); } catch (e) { /* autoplay policy — gesture already happened */ }
+  hintEl.hidden = true;
+  $("stop").hidden = false;
+  $("flip").hidden = false;
+  setStatus("Looking at the camera. Hold a leaf inside the square.", "ok");
+  raf = requestAnimationFrame(loop);
+  return true;
+}
+
+function stopCamera() {
+  cancelAnimationFrame(raf);
+  raf = 0;
+  if (stream) { stream.getTracks().forEach((t) => t.stop()); stream = null; }
+  video.srcObject = null;
+  $("stop").hidden = true;
+  $("flip").hidden = true;
+  hintEl.hidden = false;
+  timingEl.textContent = "";
+}
+
+function loop(ts) {
+  raf = requestAnimationFrame(loop);
+  if (!session || busy || !stream) return;
+  if (ts - lastFrame < FRAME_MS) return;
+  if (video.readyState < 2 || !video.videoWidth) return;
+  lastFrame = ts;
+  busy = true;
+  const t0 = performance.now();
+  predict(video, video.videoWidth, video.videoHeight)
+    .then((p) => {
+      showProbs(p);
+      const ms = performance.now() - t0;
+      timingEl.textContent = video.videoWidth + "×" + video.videoHeight +
+        " → " + MODEL.input_size + "×" + MODEL.input_size + " · " + ms.toFixed(0) + " ms/inference";
+    })
+    .catch((err) => { stopCamera(); setStatus("Inference failed: " + err.message, "bad"); })
+    .finally(() => { busy = false; });
+}
+
+/* ------------------------------------------------------------------ *
+ * Photo upload + comparison with check_expected.json
+ * ------------------------------------------------------------------ */
+function loadImage(file) {
+  return new Promise((resolve, reject) => {
+    const url = URL.createObjectURL(file);
+    const img = new Image();
+    img.onload = () => { URL.revokeObjectURL(url); resolve(img); };
+    img.onerror = () => { URL.revokeObjectURL(url); reject(new Error("could not decode " + file.name)); };
+    img.src = url;
+  });
+}
+
+async function classifyFile(file) {
+  const img = await loadImage(file);
+  const w = img.naturalWidth || img.width, h = img.naturalHeight || img.height;
+  const p = await predict(img, w, h);
+  showProbs(p);
+  return p;
+}
+
+function agreement(p, expected) {
+  let rows = "<table class='cmp'><tr><th>class</th><th>page</th><th>expected</th><th>Δ</th></tr>";
+  let worst = 0;
+  MODEL.classes.forEach((name, i) => {
+    const e = expected[name];
+    const d = Math.abs(p[i] - e);
+    worst = Math.max(worst, d);
+    rows += "<tr><td>" + name + "</td><td>" + p[i].toFixed(6) + "</td><td>" +
+            e.toFixed(6) + "</td><td>" + d.toExponential(1) + "</td></tr>";
+  });
+  // Three-decimal agreement means the rounded values are identical.
+  const pass = worst < 5e-4 && MODEL.classes.every((n, i) => p[i].toFixed(3) === expected[n].toFixed(3));
+  return { worst, pass, html: rows + "</table>" };
+}
+
+async function checkAgainstExpectation(p, label) {
+  let expected = null;
+  try {
+    const r = await fetch("check_expected.json");
+    if (r.ok) expected = await r.json();
+  } catch (e) { /* nothing to compare against */ }
+  if (!expected) {
+    checkEl.textContent = label + ": done (no check_expected.json next to the page, nothing to compare).";
+    checkEl.className = "status warn";
+    cmpEl.innerHTML = "";
+    return { pass: null };
+  }
+  const a = agreement(p, expected);
+  checkEl.innerHTML = "<span class='verdict'>" + (a.pass ? "PASS" : "FAIL") + "</span> — " + label +
+    ", largest difference " + a.worst.toExponential(1) + (a.pass ? " (agrees to 3 decimals)." : " (does NOT agree to 3 decimals).");
+  checkEl.className = "status " + (a.pass ? "ok" : "bad");
+  cmpEl.innerHTML = a.html;
+  return a;
+}
+
+// Self-check: pulls the shipped check_image.jpg and must match check_expected.json.
+async function selfCheck() {
+  if (!session) return null;
+  checkEl.textContent = "Self-check running…";
+  checkEl.className = "status";
+  try {
+    const r = await fetch("check_image.jpg");
+    if (!r.ok) throw new Error("check_image.jpg not found (" + r.status + ")");
+    const blob = await r.blob();
+    blob.name = "check_image.jpg";
+    const p = await classifyFile(new File([blob], "check_image.jpg", { type: "image/jpeg" }));
+    return await checkAgainstExpectation(p, "check_image.jpg");
+  } catch (err) {
+    checkEl.textContent = "Self-check failed: " + err.message;
+    checkEl.className = "status bad";
+    return { pass: false, error: err.message };
+  }
+}
+
+/* ------------------------------------------------------------------ *
+ * Boot: onnxruntime-web from a CDN, then the model + its metadata
+ * ------------------------------------------------------------------ */
+function loadScript(src) {
+  return new Promise((resolve, reject) => {
+    const s = document.createElement("script");
+    s.src = src;
+    s.onload = () => resolve();
+    s.onerror = () => reject(new Error("could not load " + src));
+    document.head.appendChild(s);
+  });
+}
+
+async function loadOrt() {
+  let lastError = null;
+  for (const base of ORT_CDNS) {
+    try {
+      await loadScript(base + "ort.min.js");
+      if (!window.ort) throw new Error("ort global missing from " + base);
+      ortLib = window.ort;
+      // The wasm binary and its helper module come from the same CDN folder.
+      ortLib.env.wasm.wasmPaths = base;
+      // GitHub Pages cannot send COOP/COEP headers, so no SharedArrayBuffer:
+      // stay single-threaded, which is what the wasm runtime needs then.
+      ortLib.env.wasm.numThreads = 1;
+      ortLib.env.wasm.proxy = false;
+      ortLib.env.logLevel = "error";
+      return;
+    } catch (err) { lastError = err; }
+  }
+  throw lastError || new Error("no CDN served onnxruntime-web");
+}
+
+async function boot() {
+  try {
+    const infoRequest = fetch("model_info.json").then((r) => (r.ok ? r.json() : null)).catch(() => null);
+    await loadOrt();
+    setStatus("Loading leaf_model.onnx…");
+    session = await ortLib.InferenceSession.create(MODEL_URL, { executionProviders: ["wasm"] });
+    inputName = session.inputNames[0];
+
+    // model_info.json is the source of truth; the ONNX metadata is a fallback.
+    let meta = null;
+    try {
+      const raw = session.metadata && session.metadata.customMetadataMap && session.metadata.customMetadataMap.model_info;
+      if (raw) meta = JSON.parse(raw);
+    } catch (e) { /* ignore */ }
+    MODEL = (await infoRequest) || meta;
+    if (!MODEL || !MODEL.classes || !MODEL.input_size || !MODEL.mean || !MODEL.std) {
+      throw new Error("model_info.json is missing or incomplete");
+    }
+    if (MODEL.mean.length !== 3 || MODEL.std.length !== 3) throw new Error("mean/std must have 3 values");
+
+    buildProbRows();
+    $("start").disabled = false;
+    $("selfcheck").disabled = false;
+    $("footer").insertAdjacentHTML("beforeend",
+      " <span id='classes'>Classes: " + MODEL.classes.join(", ") + " · input " +
+      MODEL.input_size + "×" + MODEL.input_size + " · mean [" + MODEL.mean.join(", ") +
+      "] · std [" + MODEL.std.join(", ") + "]</span>");
+    setStatus("Model ready (WebAssembly" + (ortLib.env.wasm.numThreads === 1 ? ", 1 thread" : "") + "). Press Start camera.", "ok");
+    if (new URLSearchParams(location.search).get("selftest")) await selfCheck();
+  } catch (err) {
+    setStatus("Could not start: " + err.message, "bad");
+  }
+}
+
+$("start").addEventListener("click", () => { startCamera(); });
+$("stop").addEventListener("click", () => { stopCamera(); setStatus("Camera stopped."); });
+$("flip").addEventListener("click", () => { facing = facing === "environment" ? "user" : "environment"; startCamera(); });
+$("file").addEventListener("change", async (e) => {
+  const file = e.target.files && e.target.files[0];
+  if (!file || !session) return;
+  checkEl.textContent = "Classifying " + file.name + "…";
+  checkEl.className = "status";
+  try {
+    const p = await classifyFile(file);
+    if (file.name.toLowerCase() === "check_image.jpg") {
+      await checkAgainstExpectation(p, file.name);
+    } else {
+      checkEl.textContent = file.name + ": " + MODEL.classes[p.indexOf(Math.max.apply(null, p))] + ".";
+      checkEl.className = "status ok";
+      cmpEl.innerHTML = "";
+    }
+  } catch (err) {
+    checkEl.textContent = "Could not classify: " + err.message;
+    checkEl.className = "status bad";
+  } finally {
+    e.target.value = "";
+  }
+});
+$("selfcheck").addEventListener("click", () => { selfCheck(); });
+
+boot();
+
+/* ================================================================== *
+ * A small QR-code encoder (byte mode, error correction level M,
+ * versions 1-9) so the page can show its own URL without asking any
+ * third-party service. Written from the ISO/IEC 18004 rules.
+ * ================================================================== */
+const buildQrMatrix = (function () {
+  const ALIGN = [[], [], [6, 18], [6, 22], [6, 26], [6, 30], [6, 34], [6, 22, 38], [6, 24, 42], [6, 26, 46]];
+  // version -> [total codewords, ecc codewords per block, [count, data codewords per block], ...] at level M
+  const SPEC = {
+    1: [26, 10, [[1, 16]]], 2: [44, 16, [[1, 28]]], 3: [70, 26, [[1, 44]]],
+    4: [100, 18, [[2, 32]]], 5: [134, 24, [[2, 43]]], 6: [172, 16, [[4, 27]]],
+    7: [196, 18, [[4, 31]]], 8: [242, 22, [[2, 38], [2, 39]]], 9: [292, 22, [[3, 36], [2, 37]]],
+  };
+
+  // GF(256) arithmetic, primitive polynomial x^8+x^4+x^3+x^2+1
+  const EXP = new Uint8Array(512), LOG = new Uint8Array(256);
+  for (let i = 0, x = 1; i < 255; i++) { EXP[i] = x; LOG[x] = i; x = (x << 1) ^ (x & 0x80 ? 0x11d : 0); }
+  for (let i = 255; i < 512; i++) EXP[i] = EXP[i - 255];
+  const gmul = (a, b) => (a === 0 || b === 0) ? 0 : EXP[LOG[a] + LOG[b]];
+
+  function rsGenerator(n) {                    // prod of (x - a^i), highest degree first
+    let g = [1];
+    for (let i = 0; i < n; i++) {
+      const next = new Array(g.length + 1).fill(0);
+      for (let j = 0; j < g.length; j++) { next[j] ^= g[j]; next[j + 1] ^= gmul(g[j], EXP[i]); }
+      g = next;
+    }
+    return g;
+  }
+
+  function rsRemainder(data, g) {
+    const n = g.length - 1, res = new Uint8Array(n);
+    for (const byte of data) {
+      const factor = byte ^ res[0];
+      res.copyWithin(0, 1); res[n - 1] = 0;
+      for (let j = 0; j < n; j++) res[j] ^= gmul(g[j + 1], factor);
+    }
+    return res;
+  }
+
+  function bch(value, generator, bits) {       // remainder of value / generator
+    let rem = value;
+    for (let i = bits - 1; i >= 0; i--) if (rem & (1 << (i + generator.toString(2).length - 1))) rem ^= generator << i;
+    return rem;
+  }
+  const formatInfo = (mask) => (((0 << 3) | mask) << 10 | bch(((0 << 3) | mask) << 10, 0x537, 10)) ^ 0x5412;
+  const versionInfo = (v) => (v << 12) | bch(v << 12, 0x1f25, 12);
+
+  function dataCodewords(text, version) {
+    const [total, eccPerBlock, groups] = SPEC[version];
+    const dataCount = total - eccPerBlock * groups.reduce((n, g) => n + g[0], 0);
+    const bytes = Array.from(new TextEncoder().encode(text));   // UTF-8 bytes
+    if (bytes.length + 2 > dataCount) throw new Error("text too long for one QR version 9 code");
+
+    const bits = [];
+    const push = (value, len) => { for (let i = len - 1; i >= 0; i--) bits.push((value >> i) & 1); };
+    push(4, 4);                                   // byte mode
+    push(bytes.length, 8);                        // 8-bit character count for versions 1-9
+    bytes.forEach((b) => push(b, 8));
+    push(0, Math.min(4, dataCount * 8 - bits.length));  // terminator
+    while (bits.length % 8) bits.push(0);
+    for (let i = 0; bits.length < dataCount * 8; i++) push(i % 2 ? 0x11 : 0xec, 8);
+
+    const words = [];
+    for (let i = 0; i < bits.length; i += 8)
+      words.push(bits.slice(i, i + 8).reduce((acc, b) => (acc << 1) | b, 0));
+
+    const blocks = [];
+    let at = 0;
+    groups.forEach(([count, len]) => {
+      for (let i = 0; i < count; i++) { blocks.push(words.slice(at, at + len)); at += len; }
+    });
+    const g = rsGenerator(eccPerBlock);
+    const ecc = blocks.map((b) => rsRemainder(b, g));
+
+    const out = [];
+    const longest = Math.max.apply(null, blocks.map((b) => b.length));
+    for (let i = 0; i < longest; i++) blocks.forEach((b) => { if (i < b.length) out.push(b[i]); });
+    for (let i = 0; i < eccPerBlock; i++) ecc.forEach((e) => out.push(e[i]));
+    return out;
+  }
+
+  const MASKS = [
+    (r, c) => (r + c) % 2 === 0,
+    (r) => r % 2 === 0,
+    (r, c) => c % 3 === 0,
+    (r, c) => (r + c) % 3 === 0,
+    (r, c) => (Math.floor(r / 2) + Math.floor(c / 3)) % 2 === 0,
+    (r, c) => ((r * c) % 2) + ((r * c) % 3) === 0,
+    (r, c) => (((r * c) % 2) + ((r * c) % 3)) % 2 === 0,
+    (r, c) => (((r + c) % 2) + ((r * c) % 3)) % 2 === 0,
+  ];
+
+  function draw(version, codewords, mask) {
+    const size = 17 + 4 * version;
+    const mod = new Uint8Array(size * size);      // colour, 1 = dark
+    const fn = new Uint8Array(size * size);       // 1 = function pattern (never masked)
+    const set = (r, c, v) => { mod[r * size + c] = v; fn[r * size + c] = 1; };
+
+    const finder = (row, col) => {
+      for (let r = -1; r <= 7; r++) for (let c = -1; c <= 7; c++) {
+        const rr = row + r, cc = col + c;
+        if (rr < 0 || cc < 0 || rr >= size || cc >= size) continue;
+        const ring = (r >= 0 && r <= 6 && (r === 0 || r === 6)) || (c >= 0 && c <= 6 && (c === 0 || c === 6));
+        const core = r >= 2 && r <= 4 && c >= 2 && c <= 4;
+        set(rr, cc, (r >= 0 && r <= 6 && c >= 0 && c <= 6) && (ring || core) ? 1 : 0);
+      }
+    };
+    finder(0, 0); finder(0, size - 7); finder(size - 7, 0);
+
+    for (let i = 8; i < size - 8; i++) { set(6, i, i % 2 === 0 ? 1 : 0); set(i, 6, i % 2 === 0 ? 1 : 0); }
+
+    const centres = ALIGN[version];
+    centres.forEach((r) => centres.forEach((c) => {
+      if ((r === 6 && c === 6) || (r === 6 && c === size - 7) || (r === size - 7 && c === 6)) return;
+      for (let dr = -2; dr <= 2; dr++) for (let dc = -2; dc <= 2; dc++)
+        set(r + dr, c + dc, Math.max(Math.abs(dr), Math.abs(dc)) === 1 ? 0 : 1);
+    }));
+
+    // Reserve the format and version information areas so no data lands there.
+    for (let i = 0; i <= 8; i++) { if (!fn[8 * size + i]) set(8, i, 0); if (!fn[i * size + 8]) set(i, 8, 0); }
+    for (let i = 0; i < 8; i++) set(8, size - 1 - i, 0);
+    for (let i = size - 8; i < size; i++) set(i, 8, 0);
+    set(size - 8, 8, 0);                       // the always-dark module, filled in below
+    if (version >= 7) for (let i = 0; i < 6; i++) for (let j = 0; j < 3; j++) {
+      set(i, size - 11 + j, 0); set(size - 11 + j, i, 0);
+    }
+
+    const bitsStream = [];
+    codewords.forEach((w) => { for (let i = 7; i >= 0; i--) bitsStream.push((w >> i) & 1); });
+    for (let i = 0; bitsStream.length < mod.length; i++) bitsStream.push(0);   // remainder bits
+
+    let at = 0, upward = true;
+    for (let right = size - 1; right >= 1; right -= 2) {
+      if (right === 6) right = 5;                 // step over the vertical timing pattern
+      for (let step = 0; step < size; step++) {
+        const row = upward ? size - 1 - step : step;
+        for (let k = 0; k < 2; k++) {
+          const col = right - k;
+          if (fn[row * size + col]) continue;
+          mod[row * size + col] = bitsStream[at++] ^ (MASKS[mask](row, col) ? 1 : 0);
+        }
+      }
+      upward = !upward;
+    }
+
+    const f = formatInfo(mask);
+    for (let i = 0; i <= 5; i++) set(i, 8, (f >> i) & 1);
+    set(7, 8, (f >> 6) & 1); set(8, 8, (f >> 7) & 1); set(8, 7, (f >> 8) & 1);
+    for (let i = 9; i < 15; i++) set(8, 14 - i, (f >> i) & 1);
+    for (let i = 0; i < 8; i++) set(8, size - 1 - i, (f >> i) & 1);
+    for (let i = 8; i < 15; i++) set(size - 15 + i, 8, (f >> i) & 1);
+    set(size - 8, 8, 1);                          // always-dark module
+
+    if (version >= 7) {
+      const v = versionInfo(version);
+      for (let i = 0; i < 18; i++) {
+        const bit = (v >> i) & 1, a = size - 11 + (i % 3), b = Math.floor(i / 3);
+        set(b, a, bit); set(a, b, bit);
+      }
+    }
+    return { size, mod };
+  }
+
+  function penalty(size, mod) {                   // ISO 18004 penalty rules, for mask choice
+    let score = 0;
+    const at = (r, c) => mod[r * size + c];
+    for (let i = 0; i < size; i++) {
+      for (const line of [
+        Array.from({ length: size }, (_, j) => at(i, j)),
+        Array.from({ length: size }, (_, j) => at(j, i)),
+      ]) {
+        let run = 1;
+        for (let j = 1; j <= size; j++) {
+          if (j < size && line[j] === line[j - 1]) { run++; continue; }
+          if (run >= 5) score += 3 + (run - 5);
+          run = 1;
+        }
+        for (const pattern of [[1, 0, 1, 1, 1, 0, 1, 0, 0, 0, 0], [0, 0, 0, 0, 1, 0, 1, 1, 1, 0, 1]]) {
+          for (let j = 0; j + pattern.length <= size; j++) {
+            let hit = true;
+            for (let k = 0; k < pattern.length; k++) if (line[j + k] !== pattern[k]) { hit = false; break; }
+            if (hit) score += 40;
+          }
+        }
+      }
+    }
+    for (let r = 0; r < size - 1; r++) for (let c = 0; c < size - 1; c++) {
+      const v = at(r, c);
+      if (v === at(r, c + 1) && v === at(r + 1, c) && v === at(r + 1, c + 1)) score += 3;
+    }
+    let dark = 0;
+    for (let i = 0; i < mod.length; i++) dark += mod[i];
+    score += Math.floor(Math.abs(dark * 100 / mod.length - 50) / 5) * 10;
+    return score;
+  }
+
+  return function build(text) {
+    let version = 0;
+    for (let v = 1; v <= 9; v++) {
+      const [total, ecc, groups] = SPEC[v];
+      const capacity = total - ecc * groups.reduce((n, g) => n + g[0], 0);
+      if (new TextEncoder().encode(text).length + 2 <= capacity) { version = v; break; }
+    }
+    if (!version) throw new Error("URL too long for this QR encoder (versions 1-9, level M)");
+
+    const codewords = dataCodewords(text, version);
+    let best = null;
+    for (let mask = 0; mask < 8; mask++) {
+      const candidate = draw(version, codewords, mask);
+      const score = penalty(candidate.size, candidate.mod);
+      if (!best || score < best.score) best = Object.assign({}, candidate, { mask, score });
+    }
+    return { version, size: best.size, mask: best.mask, modules: best.mod };
+  };
+})();
+window.buildQrMatrix = buildQrMatrix;   // small debug handle, used by the self-test
+
+function pageUrl() {
+  // Deployed: the QR always encodes the GitHub Pages address of this page.
+  // Served from anywhere else (a local test server): encode the address in use.
+  if (location.hostname.endsWith(".github.io")) return APP_URL;
+  return location.href.split("?")[0].replace(/index\.html$/, "");
+}
+
+function drawQr() {
+  const url = pageUrl();
+  let qr;
+  try { qr = buildQrMatrix(url); }
+  catch (err) { $("qr").hidden = true; $("qr-link").textContent = url; return; }
+
+  const quiet = 4, count = qr.size + quiet * 2;
+  const px = Math.max(4, Math.min(10, Math.floor(320 / count)));
+  const canvas = $("qr"), ctx = canvas.getContext("2d");
+  canvas.width = count * px;
+  canvas.height = count * px;
+  canvas.style.width = canvas.width + "px";
+  canvas.style.height = canvas.height + "px";
+  ctx.fillStyle = "#fff";
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+  ctx.fillStyle = "#000";
+  for (let r = 0; r < qr.size; r++) for (let c = 0; c < qr.size; c++)
+    if (qr.modules[r * qr.size + c]) ctx.fillRect((c + quiet) * px, (r + quiet) * px, px, px);
+
+  const link = $("qr-link");
+  link.href = url;
+  link.textContent = url;
+}
+
+drawQr();   // the address is known long before the model has loaded
+</script>
+</body>
+</html>
