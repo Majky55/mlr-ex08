@@ -87,6 +87,7 @@
   <section class="card">
     <h2>Probabilities</h2>
     <ul class="probs" id="probs"></ul>
+    <p class="status" id="probs-note">The four classes appear as soon as the model has loaded.</p>
   </section>
 
   <section class="card">
@@ -195,6 +196,8 @@ async function predict(source, srcW, srcH) {
  * ------------------------------------------------------------------ */
 function buildProbRows() {
   probsEl.textContent = "";
+  const note = $("probs-note");
+  if (note) note.remove();
   MODEL.classes.forEach((name) => {
     const li = document.createElement("li");
     li.innerHTML =
@@ -687,13 +690,17 @@ function drawQr() {
 
   const quiet = 4, count = qr.size + quiet * 2;
   const px = Math.max(4, Math.min(10, Math.floor(320 / count)));
+  // Draw at the screen's real resolution so the modules stay sharp on a phone.
+  const dpr = Math.min(3, window.devicePixelRatio || 1);
+  const side = count * px;
   const canvas = $("qr"), ctx = canvas.getContext("2d");
-  canvas.width = count * px;
-  canvas.height = count * px;
-  canvas.style.width = canvas.width + "px";
-  canvas.style.height = canvas.height + "px";
+  canvas.width = Math.round(side * dpr);
+  canvas.height = Math.round(side * dpr);
+  canvas.style.width = side + "px";
+  canvas.style.height = side + "px";
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
   ctx.fillStyle = "#fff";
-  ctx.fillRect(0, 0, canvas.width, canvas.height);
+  ctx.fillRect(0, 0, side, side);
   ctx.fillStyle = "#000";
   for (let r = 0; r < qr.size; r++) for (let c = 0; c < qr.size; c++)
     if (qr.modules[r * qr.size + c]) ctx.fillRect((c + quiet) * px, (r + quiet) * px, px, px);
