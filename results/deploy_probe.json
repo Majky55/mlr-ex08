@@ -1,0 +1,14 @@
+{
+ "candidate": "variant E — fine-tuned MobileNetV2",
+ "candidate_file": "leaf_model_E.onnx",
+ "browser": "Chrome (headless) + onnxruntime-web 1.31.1, WebAssembly, single thread",
+ "current_mb": 6.35,
+ "candidate_mb": 9.11,
+ "current_median_ms": 18.5,
+ "candidate_median_ms": 32.2,
+ "current_max_ms": 29.5,
+ "candidate_max_ms": 55.2,
+ "current_cold_ms": 82.7,
+ "candidate_cold_ms": 118.0,
+ "note": "\nBoth files were timed in the same page, back to back, several times: the current model\ncame out at 18-29 ms and E at 32-59 ms depending on what else the laptop was doing, and\nE was slower in every pair. The ratio, about 1.7x, is the number worth carrying to a\nphone; the absolute milliseconds are this machine's. Both stay under the page's\n100 ms-per-frame budget here, and both fit the browser's memory comfortably.\n"
+}

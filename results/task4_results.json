@@ -1,0 +1,64 @@
+{
+ "rows": [
+  {
+   "variant": "baseline",
+   "note": "LeafNetBN + augmentation + batch norm (Task 3d)",
+   "val": 0.79,
+   "cam": 0.548,
+   "best_epoch": 20,
+   "params": 208644
+  },
+  {
+   "variant": "A",
+   "note": "+ ColorJitter(0.2, 0.2, 0.2, 0.1) in training",
+   "val": 0.645,
+   "cam": 0.677,
+   "best_epoch": 20,
+   "params": 208644
+  },
+  {
+   "variant": "B",
+   "note": "+ weights of the epoch with the lowest validation loss",
+   "val": 0.774,
+   "cam": 0.516,
+   "best_epoch": 10,
+   "params": 208644
+  },
+  {
+   "variant": "C",
+   "note": "+ CosineAnnealingLR 1e-3 -> 1e-5 over 20 epochs",
+   "val": 0.742,
+   "cam": 0.548,
+   "best_epoch": 20,
+   "params": 208644
+  },
+  {
+   "variant": "D",
+   "note": "MobileNetV2 pretrained, backbone frozen, head trained",
+   "val": 0.839,
+   "cam": 0.645,
+   "best_epoch": 20,
+   "params": 5124
+  },
+  {
+   "variant": "E",
+   "note": "MobileNetV2 pretrained, all parameters trained at lr 1e-4",
+   "val": 0.935,
+   "cam": 0.871,
+   "best_epoch": 20,
+   "params": 2228996
+  }
+ ],
+ "meta": {
+  "epochs": 20,
+  "batch": 32,
+  "lr": 0.001,
+  "seed": 0,
+  "train": 244,
+  "val": 62,
+  "camera_like": 62,
+  "torch": "2.15.0+cpu",
+  "device": "cpu",
+  "source": "parsed from the 20-epoch sweep log"
+ }
+}

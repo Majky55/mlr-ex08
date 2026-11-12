@@ -15,6 +15,9 @@ scripts from jsDelivr.
 | `model_info.json` | Classes `apple, cherry, chestnut, maple`, `input_size` 96, `mean`, `std` |
 | `check_image.jpg` | Validation image with the notebook's probabilities |
 | `check_expected.json` | Those probabilities, for the self-check |
+| `task4_experiments.py` | Task 4: the five optimization runs, one change each, and the tables |
+| `REPORT_DRAFT.md` | Draft the same script writes from its measured runs |
+| `results/` | The measured records behind those tables (runs, seed repeats, phone costs) |
 
 ## How the frame is preprocessed
 
@@ -50,3 +53,29 @@ are needed — which GitHub Pages cannot send anyway.
 It was verified here in headless Chrome (self-check PASS, live camera on a fake
 device). **Safari on iOS has not been tested from this machine** — open it on
 your own phone and write the result, with a screenshot, into your `REVIEW.md`.
+
+## Task 4 — optimizing the classifier for the camera
+
+    pip install torch torchvision pillow
+    python task4_experiments.py          # ~20 min on a CPU laptop, no GPU needed
+
+One run per variant, `torch.manual_seed(0)` and the same batch order every time,
+the training images of `data/leaves/{train,val}` (the group's photos — they stay
+out of this repository), and every run scored twice: on the validation set and on
+one fixed **camera-like** copy of it (rotation, colour jitter, a slight crop, built
+once with its own seed). The model in the page today is the baseline row.
+
+| variant | standard validation | camera-like |
+| --- | --- | --- |
+| baseline — `LeafNetBN` from Task 3 | 79.0 % | 54.8 % |
+| A color jitter | 64.5 % | 67.7 % |
+| B best-epoch weights | 77.4 % | 51.6 % |
+| C cosine learning rate | 74.2 % | 54.8 % |
+| D frozen MobileNetV2, head trained | 83.9 % | 64.5 % |
+| E MobileNetV2 fine-tuned | **93.5 %** | **87.1 %** |
+
+62 validation images means one image is 1.6 pp, so `task4_experiments.py` also
+reran four of these from three different seeds — the spread reaches 11.3 pp, which
+is why `REPORT_DRAFT.md` reads the three-seed means and not the table above. Its
+recommendation is variant E, at 9.1 MB and ~1.7× the inference time of the model
+now deployed, both measured in this page.

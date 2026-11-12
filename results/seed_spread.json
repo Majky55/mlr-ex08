@@ -1,0 +1,12 @@
+{
+ "seeds": [0, 1, 2],
+ "units": "percent accuracy, not fractions",
+ "measured_on": "2026-11-12, torch 2.15.0+cpu, same 20 epochs / batch 32 / Adam as the main table",
+ "rows": [
+  {"variant": "baseline", "val": [79.0, 77.4, 75.8], "cam": [54.8, 53.2, 48.4]},
+  {"variant": "A", "val": [64.5, 75.8, 72.6], "cam": [67.7, 61.3, 66.1]},
+  {"variant": "D", "val": [83.9, 85.5, 82.3], "cam": [64.5, 72.6, 75.8]},
+  {"variant": "E", "val": [93.5, 90.3, 93.5], "cam": [87.1, 85.5, 87.1]}
+ ],
+ "note": "\nThree things fall out of this that the main table hides.\n\n* **Variant A is the least reproducible of the four on the standard set** (11.3 pp\n  across three seeds), so its headline -14.5 pp is largely the seed it happened to get.\n  By the mean of three runs, colour jitter costs 6.4 pp of standard accuracy and buys\n  12.9 pp of camera-like accuracy - a smaller and more believable trade than the table's\n  -14.5 / +12.9 suggests.\n* **E is the most stable** (1.6 pp of spread on the camera-like set, a single image).\n  Its lead is 20 times its own spread, and it holds on the means too\n  (86.6 % vs the baseline's 52.1 %).\n* **D's single seed-0 run is not yet evidence**: +9.7 pp over the baseline against a\n  spread of 11.3 pp of its own. Averaged over three seeds it does look real\n  (71.0 % vs 52.1 %, +18.9 pp), but it is also the variant whose camera-like accuracy\n  moved most, so do not quote its seed-0 number alone.\n\nThree seeds is still a small sample - these means have a spread of their own, roughly\nthe single-run spread divided by the square root of three.\n"
+}

@@ -4,3 +4,7 @@ ex08_for_agent/
 __pycache__/
 *.pyc
 .claude/
+
+# the group photos stay off GitHub (they are the class's own images) and the
+# cached camera-like validation tensors are rebuilt by task4_experiments.py
+data/
